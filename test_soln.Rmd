@@ -1,0 +1,211 @@
+---
+title: "cHAC R-GSOC"
+subtitle: "Solution for easy,medium and hard tests"
+author : "Shubham Chaturvedi"
+fig_width: 10
+output: html_document
+---
+shubham.link@gmail.com   
+
+***
+###Easy Tests:
+Using rioja package to obtain clustering with "coniss" and "conslink" methods
+```{r}
+#install.packages("rioja",repos = "http://cran.us.r-project.org")
+library("rioja")
+d <- read.table("dissimilarity.txt",header=TRUE,sep=" ")
+d1 = as.dist(d)
+
+clust1 = chclust(d1,method = "coniss")
+plot(clust1,hang=-1)
+
+clust2 = chclust(d1,method = "conslink")
+plot(clust2,hang=-1)
+```
+
+Possible problems:
+
+1. "conslink" method uses single linkage criterion,i.e,distance between two clusters is same as distance between closest points in the cluster. In given dataset for every merge,the distance between two clusters(by single linkage criterion) is equal to 1. Thus it wont be possible to obtain useful cluster by cutting at any level of dendogram.
+
+2. "coniss" method uses Ward's criterion.Ward's method is designed for squared euclidian distances derived from transformed(standardized,normalized,square-rooted)data (Grimm,1987).In case of non-euclidian distances the underlying geometric properties are not investigated so the new distances derived by this algorithm at each merge may not be valid.For example,distance between two points in euclidian space is not same as distance between those points along a sphere.So although this method can be used for non-eucldian matrices it may not give the desirable results.
+
+***
+***
+
+###Medium Tests:
+Similarity matrix computation and using adjClustBand_heap clustering function for h=5
+
+```{r}
+ library(devtools)
+ install_github("pneuvial/adjclust")
+m <- read.table("dissimilarity2.txt",header=TRUE,sep=" ")
+
+#similarity matrix computation
+n<-length(m)
+msq = m^2
+rowSum = rowSums(msq)
+colSum = colSums(msq)
+myFun <- function(r,c,m){-0.5*(m[r,c]^2 -(rowSum[r] + colSum[c])/n  + sum(msq)/n^2)}
+myVecFun <- Vectorize(myFun,vectorize.args = c('r','c'))
+mat<-outer(1:nrow(m), 1:ncol(m) ,myVecFun,m)
+
+p<-nrow(mat)
+h<-5
+#band extraction
+delta = row(mat) - col(mat)
+m1 <- mat
+m1[delta<(-1*h)|delta>=0]<-NA
+
+m2<-c(m1)
+
+#vectorizing the band
+m3<-m2[!is.na(m2)]
+
+#using adjClustBand_heap to get hclust object
+fit <- adjclust:::adjClustBand_heap(m3, p, h, blMin=1)
+
+#install.packages("ggdendro")
+library(ggplot2)
+library(ggdendro)
+ggdendrogram(fit)
+
+head(cbind(fit$merge,fit$gains))
+```
+Interpretation of results : Clusters with labels -118 and -119 having distance metric -12.45 merge followed by clusters with labels -131 and -132 and so on..until only one cluster is left
+
+***
+Basic R function that takes a similarity matrix and a value for h and calls for ‘adjClustBand_heap’ to obtain a ‘hclust’ object :
+```{r}
+func1<-function(mat,h){
+p<-nrow(mat)  
+#band extraction
+delta = row(mat) - col(mat)
+m1 <- mat
+m1[delta<(-1*h)|delta>=0]<-NA
+m2<-c(m1)
+
+#vectorizing the band
+m3<-m2[!is.na(m2)]
+
+#using adjClustBand_heap to get hclust object
+fit <- adjclust:::adjClustBand_heap(m3, p, h, blMin=1)
+return(fit)
+}
+```
+
+***
+Implementing the rioja package and comparison with adjclust
+```{r}
+library("rioja")
+y <- read.table("dissimilarity2.txt",header=TRUE,sep=" ")
+y1 = as.dist(y)
+
+clust3 = chclust(y1,method = "coniss")
+plot(clust3,hang=-1)
+head(cbind(clust3$merge,clust3$gains))
+```
+
+Results from rioja's implementation might differ from adjclust implementation because the former uses dissimilarity measures instead of similarity measures 
+
+
+**Trying out for values of h equal to 5,10,20,50,100,140**
+```{r}
+#install.packages("ggdendro")
+
+ggdendrogram(func1(mat,5))
+ggdendrogram(func1(mat,10))
+ggdendrogram(func1(mat,20))
+ggdendrogram(func1(mat,50))
+ggdendrogram(func1(mat,100))
+ggdendrogram(func1(mat,140))
+
+```
+
+
+***
+***
+
+#Hard Tests
+*Implementation : adjClustBand_heap*
+
+**Functions and their implementations:**
+
+**1.percDown(positions,distances,l,pos)** : Given a tree such that right and left child trees of node i are heaps,percDown function arranges node i and it’s subtrees to satisfy the (min) heap property.It is used in bulidHeap.R function which builds a min-heap starting from unordered vector of values.
+
+**2.deleteMin_C(positions,distances,l)** : Deletes the minimum from heap.More specifically deletes positions having minimum distances.Used in cWardHeaps function to select the  the best possible clusters to merge.
+
+**3.insertHeap_C(positions,distances,l,key)** : Inserts a new element in heap.Used in cWardHeaps to include new possible linkages(positions).
+
+**4.neighborCl_C(sense,posMin,chainedL)** : Returns right/left neighboring positions and clusters and  labels corresponding to them.Used in cWardHeaps to get information about neighbours of posMin(=best linkage possible).
+
+**5.neiNeighborPos_C(sense,posMin,chainedL)** : Returns information about neighbour of neighbour of posMin that is useful in cWardHeaps function.
+
+**6.pencil_C(sense,lim,hLoc,p,rcCumRight,rcCumLeft)** : Computes the pencil shaped area which is then used in distance computation inside distance function.
+
+**7.distance_C(...)** : Computes distance between two clusters using ward criterion.Used in cWardHeaps to find distance of newly formed cluster with its neighbours.
+
+**8.cWardHeaps(...)** : Performes clustering with help of other functions above.Selects closest cluster using heap functions,performes merging of clusters,updates chaining table and calculates new distances.
+
+**9.toMatL and toMatR** : Used to create p*h matrices with zeros on bottom right and top left respectively.After cumulative row and columns summing,these matrices can be used for efficient calculation of pencil shaped areas.
+  
+***  
+**DEPENDENCY GRAPH:**
+```{r,echo = FALSE}
+library(igraph)
+g=graph.formula(cWardHeaps-+distance_C,distance_C-+pencil_C,cWardHeaps-+neighborCl_C,cWardHeaps-+neiNeighborPos_C,cWardHeaps-+deleteMin_C)
+plot(g)
+```
+
+***
+***
+
+**IMPLEMENTATION OF SINGLE LINKAGE CRITERION**
+
+For implemetation of single linkage criterion,a modified form for matL is used such that modmatL= 1 - matL.From modmatL matrix,the distance between the clusters is computed.
+
+The complete script for single linkage criterion implementation is available at [www.github.com/rewee/adjclust](www.github.com/rewee/adjclust) .The functions changed are distance_C,cWardHeaps and adjClustBand_heap.
+
+***
+Tests for single linkage implementation:
+
+**TEST INPUT 1**
+```{r}
+# commented to avoid conflicts between two implementations of the function
+# install_github("rewee/adjclust")
+x<-c(70,60,55,22,71,21,10,39,84,40,66,91,50,35,66)
+p<-7
+h<-3
+#fit <- adjclust:::adjClustBand_heap(x, p, h, blMin=1)
+#cbind(fit$merge, fit$gains)
+```
+output:
+
+     [,1] [,2] [,3]
+[1,]   -5   -6  -90   
+[2,]   -4    1  -83   
+[3,]   -1   -2  -69     
+[4,]    2   -7  -65   
+[5,]    3   -3  -59   
+[6,]    5    4  -70   
+
+***
+**TEST INPUT 2**
+```{r}
+ x <- c(71,52,83,14,35,26,47)
+ p<-5
+ h<-2
+# fit <- adjclust:::adjClustBand_heap(x, p, h, blMin=1)
+# cbind(fit$merge, fit$gains)
+```
+output:
+
+     [,1] [,2] [,3]
+[1,]   -2   -3  -82   
+[2,]   -1    1  -70   
+[3,]   -4   -5  -46   
+[4,]    2    3  -34   
+
+
+***
+***
+***
