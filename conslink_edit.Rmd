@@ -1,0 +1,78 @@
+---
+title: "Adjclust and rioja Part2"
+author: "Shubham Chaturvedi"
+output: html_document
+---
+
+```{r}
+library(devtools)
+install_github("rewee/adjclust")
+
+m <- read.table("dissimilarity2.txt",header=TRUE,sep=" ")
+
+#similarity matrix computation
+n<-length(m)
+msq = m^2
+rowSum = rowSums(msq)
+colSum = colSums(msq)
+
+myFun <- function(r,c,m){-0.5*(m[r,c]^2 -(rowSum[r] + colSum[c])/n  + sum(msq)/n^2)}
+myVecFun <- Vectorize(myFun,vectorize.args = c('r','c'))
+mat<-outer(1:nrow(m), 1:ncol(m) ,myVecFun,m)
+
+#scaling
+myFun2 <- function(r,c,m){m[r,c]/sqrt(diag(m)[r]*diag(m)[c])}
+myVecFun2 <- Vectorize(myFun2,vectorize.args = c('r','c'))
+mat1<-outer(1:nrow(mat), 1:ncol(mat) ,myVecFun2,mat)
+diag(mat1)
+
+func1<-function(mat,h){
+p<-nrow(mat)  
+#band extraction(from upper triangle with width h excluding diagonal)
+delta = row(mat) - col(mat)
+m1 <- mat
+m1[delta<(-1*h)|delta>=0]<-NA
+m2<-c(m1)
+
+#vectorizing the band
+m3<-m2[!is.na(m2)]
+
+#using adjClustBand_heap to get hclust object
+fit <- adjclust:::adjClustBand_heap(m3, p, h, blMin=1)
+return(fit)
+}
+
+fit1<-func1(mat1,149)
+```
+
+Now calculating for rioja
+
+```{r}
+library("rioja")
+mat2 <- 2 - (2*mat1)
+mat2 <- as.dist(mat2)
+fit2<- chclust(mat2,method="conslink")
+
+```
+
+**Comparing the two fits**
+
+```{r}
+isTRUE(all.equal(fit1$merge,fit2$merge))
+head(cbind(adjclust=fit1$merge,rioja=fit2$merge))
+```
+
+
+***
+***
+Plotting the results obtained
+
+```{r}
+plot(fit1,hang=-1,sub="adjclust")
+plot(fit2,hang=-1,sub="rioja")
+```
+
+***
+Although results differ at few merges,it can be verified that adjclust follows the single linkage implementation correctly
+
+***
